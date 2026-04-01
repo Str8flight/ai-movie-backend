@@ -1,45 +1,57 @@
+// server.js
 const express = require("express");
-const multer = require("multer");
 const cors = require("cors");
+const bodyParser = require("body-parser");
 const fs = require("fs");
-const pdfParse = require("pdf-parse");
 const { exec } = require("child_process");
+const path = require("path");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
 app.use(cors());
+app.use(bodyParser.json());
 
-// create folders
-if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
-if (!fs.existsSync("videos")) fs.mkdirSync("videos");
+// Make sure videos directory exists
+const videosDir = path.join(__dirname, "videos");
+if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir);
 
-app.use("/videos", express.static("videos"));
-
-const upload = multer({ dest: "uploads/" });
-
-app.post("/upload", upload.single("file"), async (req, res) => {
+// POST /generate-text-video
+app.post("/generate-text-video", async (req, res) => {
   try {
-    const dataBuffer = fs.readFileSync(req.file.path);
-    const data = await pdfParse(dataBuffer);
+    let { text } = req.body;
 
-    const text = data.text.substring(0, 200).replace(/:/g, "");
+    if (!text) return res.status(400).json({ error: "No text provided" });
 
-    const output = `videos/movie_${Date.now()}.mp4`;
+    // Sanitize text for FFmpeg
+    const safeText = text.substring(0, 300).replace(/['":]/g, "");
 
-    const cmd = `ffmpeg -f lavfi -i color=c=black:s=1280x720:d=6 -vf "drawtext=text='${text}':fontcolor=white:x=50:y=300" ${output}`;
+    const timestamp = Date.now();
+    const outputFile = path.join(videosDir, `movie_${timestamp}.mp4`);
 
-    exec(cmd, (err) => {
-      if (err) return res.status(500).send("Error");
+    // FFmpeg command: black background, draw text
+    const ffmpegCmd = `ffmpeg -y -f lavfi -i color=c=black:s=1280x720:d=6 -vf "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='${safeText}':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2" ${outputFile}`;
 
-      res.json({
-        videoUrl: `${req.protocol}://${req.get("host")}/${output}`,
-      });
+    exec(ffmpegCmd, (error) => {
+      if (error) {
+        console.error("FFmpeg error:", error);
+        return res.status(500).json({ error: "Video generation failed" });
+      }
+
+      // Return public URL of video
+      const videoUrl = `${req.protocol}://${req.get("host")}/videos/movie_${timestamp}.mp4`;
+      res.json({ videoUrl });
     });
 
   } catch (err) {
-    res.status(500).send("Processing error");
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-app.listen(process.env.PORT || 5000, () => {
-  console.log("Server running...");
+// Serve videos statically
+app.use("/videos", express.static(videosDir));
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
