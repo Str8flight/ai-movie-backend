@@ -1,108 +1,91 @@
-// server.js
 const express = require("express");
 const cors = require("cors");
+const axios = require("axios");
 const fs = require("fs");
-const { exec } = require("child_process");
 const path = require("path");
 
 const app = express();
-const PORT = process.env.PORT || 8080;
-
 app.use(cors());
 app.use(express.json());
 
-// =======================
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
+
+// =========================
 // HEALTH CHECK
-// =======================
+// =========================
 app.get("/", (req, res) => {
-  res.send("AI Movie Backend Running 🚀");
+  res.send("Faceless AI Video Generator Running 🚀");
 });
 
-// =======================
-// TEMP STORAGE (RAILWAY SAFE)
-// =======================
-const tmpDir = "/tmp";
-if (!fs.existsSync(tmpDir)) {
-  fs.mkdirSync(tmpDir, { recursive: true });
+// =========================
+// 1. SIMPLE SCRIPT BREAKDOWN
+// =========================
+function createScenes(text) {
+  const sentences = text.split(".").filter(s => s.trim().length > 0);
+
+  return sentences.slice(0, 5).map(s => ({
+    scene: s.trim()
+  }));
 }
 
-// =======================
-// TEST FFmpeg
-// =======================
-app.get("/test-ffmpeg", (req, res) => {
-  exec("ffmpeg -version", (err, stdout, stderr) => {
-    if (err) return res.status(500).send("FFmpeg not working");
-    res.send(stdout);
-  });
-});
-
-// =======================
-// MAIN VIDEO GENERATOR
-// =======================
-app.post("/generate-text-video", (req, res) => {
+// =========================
+// 2. GET STOCK VIDEO
+// =========================
+async function getVideo(query) {
   try {
-    let { text } = req.body;
+    const res = await axios.get(
+      `https://api.pexels.com/videos/search?query=${query}&per_page=1`,
+      {
+        headers: {
+          Authorization: G49eaKSng9cfPcACHhRSi794clGA6iWOKaD5CIaCjnEJvJFlIFEnRE7I
+        }
+      }
+    );
 
-    if (!text) {
-      return res.status(400).json({ error: "No text provided" });
+    const video = res.data.videos[0];
+    return video?.video_files[0]?.link || null;
+
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+// =========================
+// MAIN API
+// =========================
+app.post("/generate-video", async (req, res) => {
+  try {
+    const { text } = req.body;
+
+    if (!text) return res.status(400).json({ error: "No text" });
+
+    // 1. Create scenes
+    const scenes = createScenes(text);
+
+    // 2. Get stock videos for each scene
+    const results = [];
+
+    for (let s of scenes) {
+      const video = await getVideo(s.scene);
+
+      results.push({
+        text: s.scene,
+        video: video
+      });
     }
 
-    // Clean text (VERY IMPORTANT for FFmpeg safety)
-    const safeText = text
-      .substring(0, 500)
-      .replace(/['":]/g, "")
-      .replace(/\n/g, " ");
-
-    const fileName = `movie_${Date.now()}.mp4`;
-    const outputFile = path.join(tmpDir, fileName);
-
-    // =======================
-    // FFmpeg COMMAND (CLEAN + RAILWAY SAFE)
-    // =======================
-    const ffmpegCmd = `
-      ffmpeg -y
-      -f lavfi -i color=c=black:s=1280x720:d=6
-      -vf "drawtext=text='${safeText}':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2"
-      ${outputFile}
-    `;
-
-    console.log("Running FFmpeg...");
-
-    exec(ffmpegCmd, (error, stdout, stderr) => {
-      if (error) {
-        console.error("FFMPEG ERROR:", error);
-        console.error(stderr);
-
-        return res.status(500).json({
-          error: "Video generation failed",
-          details: stderr
-        });
-      }
-
-      console.log("Video created:", outputFile);
-
-      const videoUrl = `${req.protocol}://${req.get("host")}/video/${fileName}`;
-
-      return res.json({
-        success: true,
-        videoUrl
-      });
+    // 3. Return scene-based video list
+    res.json({
+      success: true,
+      scenes: results
     });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Server crash" });
+    res.status(500).json({ error: "Failed" });
   }
 });
 
-// =======================
-// SERVE GENERATED VIDEOS
-// =======================
-app.use("/video", express.static(tmpDir));
-
-// =======================
-// START SERVER
-// =======================
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log("Server running on", PORT));
