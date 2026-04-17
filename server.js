@@ -41,8 +41,7 @@ app.post("/generate-text-video", async (req, res) => {
     const outputFile = path.join(videosDir, `movie_${timestamp}.mp4`);
 
     // FFmpeg command: black background, draw text
-    const ffmpegCmd = `ffmpeg -y -f lavfi -i color=c=black:s=1280x720:d=6 -vf "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='${safeText}':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2:line_spacing=10" ${outputFile}`;
-
+const ffmpegCmd = `ffmpeg -y -f lavfi -i color=c=black:s=1280x720:d=6 -vf "drawtext=text='${safeText}':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2" ${outputFile}`;
     exec(ffmpegCmd, (error) => {
       if (error) {
         console.error("FFmpeg error:", error);
